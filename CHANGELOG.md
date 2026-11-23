@@ -23,6 +23,11 @@ itself based on krisgfx's Wireless Battery.
 - Varmilo keyboards over Bluetooth LE were shown as a second mouse.
 - The code compiles with MSVC as well as MinGW.
 
+### Security
+
+- `headsetcontrol.exe` is only taken from the app's folder or an absolute `PATH` entry, never from the current
+  directory, and is started by full path.
+
 ### Changed
 
 - English interface by default (the Windows display language when a translation exists).

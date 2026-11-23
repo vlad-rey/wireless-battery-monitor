@@ -113,14 +113,35 @@ std::wstring FindExe() {
     std::wstring dir = self;
     dir = dir.substr(0, dir.find_last_of(L"\\/") + 1);
     std::wstring local = dir + L"headsetcontrol.exe";
-    if (GetFileAttributesW(local.c_str()) != INVALID_FILE_ATTRIBUTES) return local;
-    wchar_t found[MAX_PATH];
-    if (SearchPathW(nullptr, L"headsetcontrol.exe", nullptr, MAX_PATH, found, nullptr)) return found;
+    auto isFile = [](const std::wstring& p) {
+        DWORD a = GetFileAttributesW(p.c_str());
+        return a != INVALID_FILE_ATTRIBUTES && !(a & FILE_ATTRIBUTE_DIRECTORY);
+    };
+    if (isFile(local)) return local;
+    // Then the PATH, walked here instead of SearchPathW: its default order includes the current directory,
+    // where anyone able to drop a file could plant a headsetcontrol.exe. Only absolute entries are used.
+    DWORD n = GetEnvironmentVariableW(L"PATH", nullptr, 0);
+    if (!n) return L"";
+    std::wstring path(n, L'\0');
+    path.resize(GetEnvironmentVariableW(L"PATH", path.data(), n));
+    for (size_t pos = 0; pos <= path.size();) {
+        size_t end = path.find(L';', pos);
+        if (end == std::wstring::npos) end = path.size();
+        std::wstring entry = path.substr(pos, end - pos);
+        pos = end + 1;
+        if (entry.size() >= 2 && entry.front() == L'"' && entry.back() == L'"') entry = entry.substr(1, entry.size() - 2);
+        bool absolute = (entry.size() >= 3 && entry[1] == L':' && (entry[2] == L'\\' || entry[2] == L'/')) ||
+                        entry.rfind(L"\\\\", 0) == 0;
+        if (!absolute) continue;
+        if (entry.back() != L'\\' && entry.back() != L'/') entry += L'\\';
+        if (isFile(entry + L"headsetcontrol.exe")) return entry + L"headsetcontrol.exe";
+    }
     return L"";
 }
 
-// Runs the command line and returns its stdout (empty on failure or after `timeoutMs`).
-std::string Run(std::wstring cmd, int timeoutMs) {
+// Runs `exe` (a full path, so CreateProcessW never searches for it) with the command line and returns its
+// stdout (empty on failure or after `timeoutMs`).
+std::string Run(const std::wstring& exe, std::wstring cmd, int timeoutMs) {
     SECURITY_ATTRIBUTES sa{ sizeof(sa), nullptr, TRUE };
     HANDLE rd, wr;
     if (!CreatePipe(&rd, &wr, &sa, 0)) return "";
@@ -131,7 +152,7 @@ std::string Run(std::wstring cmd, int timeoutMs) {
     si.hStdError = wr;
     si.hStdInput = nullptr;
     PROCESS_INFORMATION pi{};
-    BOOL ok = CreateProcessW(nullptr, cmd.data(), nullptr, nullptr, TRUE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi);
+    BOOL ok = CreateProcessW(exe.c_str(), cmd.data(), nullptr, nullptr, TRUE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi);
     CloseHandle(wr);
     std::string out;
     if (ok) {
@@ -202,10 +223,14 @@ std::vector<HscDevice> g_devices;
 ULONGLONG g_updated = 0;
 LONG g_running = 0;
 
-std::wstring Command() {
+const std::wstring& Exe() {
     static std::wstring exe = FindExe();
-    if (exe.empty()) return L"";
-    std::wstring cmd = L"\"" + exe + L"\" -b -o json --timeout 1500";
+    return exe;
+}
+
+std::wstring Command() {
+    if (Exe().empty()) return L"";
+    std::wstring cmd = L"\"" + Exe() + L"\" -b -o json --timeout 1500";
     wchar_t test[8];
     if (GetEnvironmentVariableW(L"WB_HSC_TEST_DEVICE", test, 8)) cmd += L" --test-device";  // for development
     return cmd;
@@ -213,7 +238,7 @@ std::wstring Command() {
 
 void Refresh() {
     std::wstring cmd = Command();
-    std::vector<HscDevice> found = cmd.empty() ? std::vector<HscDevice>{} : Parse(Run(cmd, 30000));
+    std::vector<HscDevice> found = cmd.empty() ? std::vector<HscDevice>{} : Parse(Run(Exe(), cmd, 30000));
     AcquireSRWLockExclusive(&g_lock);
     g_devices = found;
     g_updated = GetTickCount64();
