@@ -54,13 +54,15 @@ Varmilo APT87 (Bluetooth LE), Xbox Wireless Controller (Bluetooth).
 
 ## Install
 
-1. Download `WirelessBattery.exe` from the [latest release](https://github.com/vlad-rey/wireless-battery-monitor/releases/latest),
-   or build it yourself (see [Build](#build)).
-2. Put it in any folder, for example `%LOCALAPPDATA%\Programs\WirelessBattery`, and run it.
-3. Click the widget (or tray icon) for the menu; turn on *Start with Windows* there.
+**Installer (recommended):** download `WirelessBattery-Setup-<version>.exe` from the
+[latest release](https://github.com/vlad-rey/wireless-battery-monitor/releases/latest) and run it. It installs for the
+current user without administrator rights, adds a Start menu entry and an uninstaller (*Settings → Apps*), can start the
+app with Windows, and includes HeadsetControl.
 
-Optional: put `headsetcontrol.exe` ([HeadsetControl](https://github.com/Sapd/HeadsetControl) 4.3.0) next to the exe
-(or on `PATH`) for the headsets only HeadsetControl supports. Everything else works without it.
+**Portable:** download `WirelessBattery.exe` (or the portable zip), put it in any folder and run it. Click the widget
+(or tray icon) for the menu and turn on *Start with Windows* there. For the headsets only
+[HeadsetControl](https://github.com/Sapd/HeadsetControl) supports, put its `headsetcontrol.exe` 4.3.0 next to the exe
+(or in a folder on `PATH`). Everything else works without it.
 
 The exe is not code-signed, so SmartScreen may warn about it. Choose *More info → Run anyway*, or build it yourself.
 
