@@ -1,0 +1,35 @@
+name: Bug report
+description: Something does not work as described (wrong level, widget in the wrong place, crash, ...).
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you expected and what you saw instead. A screenshot of the taskbar helps.
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: Device
+      description: Name and how it is connected (receiver, cable or Bluetooth).
+      placeholder: "AJAZZ AJ159 Apex, 2.4 GHz receiver"
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version
+      description: "From `winver`, e.g. Windows 11 24H2 (26100.4061). Mention taskbar mods such as Windhawk or ExplorerPatcher."
+    validations:
+      required: true
+  - type: textarea
+    id: list
+    attributes:
+      label: Output of `WirelessBattery.exe --list`
+      render: text
+  - type: textarea
+    id: dump
+    attributes:
+      label: Output of `WirelessBattery.exe --dump` (if the problem is about one device)
+      description: Also saved to `%TEMP%\WirelessBattery-dump.txt`. You can attach the file instead.
+      render: text

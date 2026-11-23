@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Wireless Battery
+Comment=Show battery levels of wireless mice, keyboards and headsets in the system tray
+Exec=wireless-battery
+Icon=wireless-battery
+Terminal=false
+Categories=System;Monitor;Utility;
+StartupNotify=false

@@ -1,0 +1,49 @@
+# Linux (Fedora / Ubuntu) build. Kept separate from the Windows Makefile so the existing
+# MinGW build stays untouched. GTK4/GIO provide the StatusNotifierItem tray icon; HID access goes
+# straight to hidraw, so no extra HID library is needed.
+#
+# Fedora:   sudo dnf install gcc-c++ make gtk4-devel cairo-devel
+# Ubuntu:   sudo apt install g++ make libgtk-4-dev libcairo2-dev
+#
+# ./build-linux.sh          (from the repository root; same as: make -f linux/Makefile.linux)
+# ./build-linux.sh clean
+
+CXX      ?= g++
+PKGCONFIG ?= pkg-config
+CXXFLAGS ?= -std=c++17 -O2 -Wall -Wno-missing-field-initializers
+GTK_CFLAGS := $(shell $(PKGCONFIG) --cflags gtk4 cairo)
+GTK_LIBS   := $(shell $(PKGCONFIG) --libs gtk4 cairo)
+
+# Phase 1: famous vendors whose drivers only need the portable HID API.
+DRIVERS := \
+    src/drivers/glorious.cpp \
+    src/drivers/kysona.cpp \
+    src/drivers/logitech.cpp \
+    src/drivers/razer.cpp \
+    src/drivers/steelseries.cpp \
+    src/drivers/corsair.cpp \
+    src/drivers/hyperx.cpp \
+    src/drivers/playstation.cpp \
+    src/drivers/coolermaster.cpp \
+    src/drivers/finalmouse.cpp
+
+SRC := src/linux/hid_linux.cpp src/linux/devices_linux.cpp src/linux/main_linux.cpp $(DRIVERS)
+OBJ := $(patsubst src/%.cpp,build/linux/%.o,$(SRC))
+TARGET := wireless-battery
+
+$(TARGET): $(OBJ)
+	$(CXX) $^ -o $@ $(GTK_LIBS) -pthread
+
+build/linux/%.o: src/%.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) $(GTK_CFLAGS) -c $< -o $@
+
+test:
+	@mkdir -p build/linux
+	$(CXX) $(CXXFLAGS) tests/linux_hid_test.cpp -o build/linux/linux_hid_test
+	./build/linux/linux_hid_test
+
+clean:
+	rm -rf build/linux $(TARGET)
+
+.PHONY: clean test

@@ -1,0 +1,4 @@
+# Allow the active desktop user to read HID battery reports without running as root.
+# Uses logind's "uaccess" tag, so access follows the active session and no world-writable
+# permissions are needed. Reload with: sudo udevadm control --reload-rules && sudo udevadm trigger
+SUBSYSTEM=="hidraw", TAG+="uaccess"

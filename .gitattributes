@@ -1,0 +1,9 @@
+# Text files are stored with LF line endings in the repository.
+* text=auto eol=lf
+
+# cmd needs CRLF for labels and goto to work reliably.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+*.png binary
+*.ico binary

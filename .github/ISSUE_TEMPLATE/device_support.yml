@@ -1,0 +1,45 @@
+name: Device support
+description: Ask for a device that is not shown, or report that a listed device works or not.
+labels: [device]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A new device needs its battery protocol. The fastest way is a link to a project that already reads it,
+        or a USB capture of the vendor's software while it shows the battery (see CONTRIBUTING.md).
+  - type: input
+    id: device
+    attributes:
+      label: Device
+      description: Name as it is sold, and how it is connected (receiver, cable or Bluetooth).
+      placeholder: "Varmilo APT87, 2.4 GHz receiver"
+    validations:
+      required: true
+  - type: dropdown
+    id: kind
+    attributes:
+      label: This is
+      options:
+        - A device that is not shown
+        - A listed device that does not work
+        - A listed device that works (please tell us, most drivers are untested)
+    validations:
+      required: true
+  - type: textarea
+    id: vendor
+    attributes:
+      label: Does the vendor's software show the battery?
+      description: Name the app or web configurator, and what level it shows.
+  - type: textarea
+    id: dump
+    attributes:
+      label: Output of `WirelessBattery.exe --dump`
+      description: Also saved to `%TEMP%\WirelessBattery-dump.txt`. You can attach the file instead.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: sources
+    attributes:
+      label: Where the protocol is documented (if you know)
+      description: Another project, a USB capture, notes.
