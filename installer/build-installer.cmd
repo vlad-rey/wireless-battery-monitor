@@ -48,4 +48,4 @@ makensis "installer\WirelessBattery.nsi"
 if errorlevel 1 exit /b 1
 
 echo.
-echo Done: dist\WirelessBattery-Setup-1.0.0.exe
+echo Done: the installer is in dist\ (version from APP_VERSION in installer\WirelessBattery.nsi)
