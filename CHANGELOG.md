@@ -2,6 +2,14 @@
 
 All notable changes to this fork. Versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- *Start with Windows* did nothing on Windows 11 builds that only start Run entries Explorer has marked as enabled.
+  The app and the installer now also write that flag (`Explorer\StartupApproved\Run`), and the menu shows autostart
+  as off when it was disabled in Task Manager or Settings.
+
 ## [1.0.0] - 2026-11-23
 
 First release of this fork, based on

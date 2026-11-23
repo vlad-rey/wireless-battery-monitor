@@ -191,11 +191,24 @@ void SaveStacked(bool on) { SaveBoolSetting(L"StackedLayout", on); }
 bool LoadBrandColors() { return LoadBoolSetting(L"BrandColors", false); }
 void SaveBrandColors(bool on) { SaveBoolSetting(L"BrandColors", on); }
 
+// Explorer keeps an on/off flag per Run entry here (Task Manager's Startup apps page, Settings > Apps > Startup).
+// The first byte is 02 (or 06) for enabled and 03 for disabled. Some Windows 11 builds skip a Run entry that has no
+// flag at all, so turning autostart on writes "enabled" explicitly.
+const wchar_t* kStartupApprovedKey = L"Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\StartupApproved\\Run";
+
+bool StartupDisabledByUser() {
+    BYTE flag[12] = {};
+    DWORD sz = sizeof(flag);
+    if (RegGetValueW(HKEY_CURRENT_USER, kStartupApprovedKey, kRunValue, RRF_RT_REG_BINARY, nullptr, flag, &sz) != ERROR_SUCCESS)
+        return false;
+    return sz > 0 && (flag[0] & 1);  // odd = disabled
+}
+
 bool AutostartEnabled() {
     wchar_t buf[MAX_PATH * 2];
     DWORD sz = sizeof(buf);
     if (RegGetValueW(HKEY_CURRENT_USER, kRunKey, kRunValue, RRF_RT_REG_SZ, nullptr, buf, &sz) != ERROR_SUCCESS) return false;
-    return _wcsicmp(buf, (L"\"" + ExePath() + L"\"").c_str()) == 0;
+    return _wcsicmp(buf, (L"\"" + ExePath() + L"\"").c_str()) == 0 && !StartupDisabledByUser();
 }
 
 void SetAutostart(bool on) {
@@ -208,6 +221,12 @@ void SetAutostart(bool on) {
         RegDeleteValueW(k, kRunValue);
     }
     RegCloseKey(k);
+    if (on) {
+        const BYTE enabled[12] = { 0x02 };  // 02, then 11 zero bytes (no "disabled at" time), as Windows writes it
+        RegSetKeyValueW(HKEY_CURRENT_USER, kStartupApprovedKey, kRunValue, REG_BINARY, enabled, sizeof(enabled));
+    } else {
+        RegDeleteKeyValueW(HKEY_CURRENT_USER, kStartupApprovedKey, kRunValue);
+    }
 }
 
 // ---- icon rendering ---------------------------------------------------------------------------

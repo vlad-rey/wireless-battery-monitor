@@ -95,6 +95,8 @@ SectionEnd
 ; The same quoted value the app's own "Start with Windows" menu item writes, so the menu shows it as on.
 Section /o "Start with Windows" SecAutostart
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "WirelessBattery" '"$INSTDIR\${APP_EXE}"'
+  ; Mark the entry enabled: some Windows 11 builds skip Run entries without this flag.
+  WriteRegBin HKCU "Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run" "WirelessBattery" 020000000000000000000000
 SectionEnd
 
 !insertmacro MUI_FUNCTION_DESCRIPTION_BEGIN
@@ -118,6 +120,7 @@ Section "Uninstall"
   RMDir  "$INSTDIR"
 
   DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "WirelessBattery"
+  DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run" "WirelessBattery"
   DeleteRegKey  HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_ID}"
   DeleteRegKey  HKCU "Software\${APP_ID}"
   DeleteRegKey  HKCU "Software\WirelessBattery"
