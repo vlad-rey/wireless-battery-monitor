@@ -2,6 +2,18 @@
 
 All notable changes to this fork. Versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- Auto-hidden taskbar: Windows exposes the tray to UI Automation only while the taskbar is shown, so the widget fell
+  back to `TrayNotifyWnd` and covered the clock (seen with Windhawk's Windows 11 Taskbar Styler on a 4K monitor). The
+  last tray position measured while the taskbar was shown is now kept while it is hidden, saved for the next start
+  (per taskbar width and DPI), and applied as soon as it is measured instead of on the next timer tick.
+- Auto-hidden taskbar: the widget sat in the few pixels a hidden taskbar leaves on screen and took the mouse, so
+  pointing there did not bring the taskbar up. It now lets the mouse through while the taskbar is hidden.
+- Secondary taskbars that are auto-hidden no longer put the widget over the clock before their tray was measured.
+
 ## [1.0.1] - 2026-11-23
 
 ### Fixed

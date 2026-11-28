@@ -31,6 +31,7 @@ int g_animFrom = -1, g_animTo = -1, g_animDir = 1;
 ULONGLONG g_animStart = 0;
 const UINT kAnimTimer = 1;              // WM_TIMER id that drives the slide
 const UINT kWheelMsg = WM_APP + 21;     // posted from the low-level hook to the strip
+const UINT kTrayMsg = WM_APP + 22;      // posted by the lookup thread when a tray position changed
 const int kSlideMs = 190;               // one full slide
 HHOOK g_wheelHook = nullptr;
 
@@ -52,6 +53,7 @@ struct Mirror {
     SIZE size{};
     int dpi = 0;
     int lastLeft = INT_MIN;  // client x it was last placed at; INT_MIN = not placed (hidden)
+    RECT lastBar{};          // taskbar rectangle at the last placement: a change (auto-hide) asks for a new lookup
 };
 std::vector<Mirror> g_mirrors;
 // Which taskbars show the strip: "all", "main", or one monitor's id (MonitorId), e.g. only monitor 3.
@@ -89,14 +91,74 @@ HANDLE g_wbWake;             // auto-reset: wakes the lookup thread early
 // Where a Windows 11 secondary taskbar's clock and task buttons are. Its XAML has no child windows for
 // them, so the same lookup thread reads them with UI Automation (the clock has AutomationId
 // "SystemTrayIcon", task buttons class "Taskbar.TaskListButtonAutomationPeer"; found by PR #107).
+//
+// An auto-hidden taskbar exposes none of these elements while it is hidden, so a hidden taskbar counts as
+// not measured, and the last measurement taken while it was shown is kept for as long as the taskbar keeps
+// its width (KeepShown). Hiding only moves a taskbar off the screen edge; the x positions stay valid.
 struct Span {
     HWND bar = nullptr;
-    bool measured = false;   // UI Automation answered for this taskbar
+    bool measured = false;   // UI Automation answered for this taskbar while it was on screen
     bool hasClock = false;   // the clock can be turned off on secondary taskbars
     int clockLeft = 0;       // screen x
     bool hasTasks = false;
     int tasksRight = 0;      // right edge of the last task button left of the clock (screen x)
+    LONG barLeft = 0, barRight = 0;  // taskbar edges when measured (screen x)
 };
+
+// The fresh measurement, or the previous one for the same taskbar when the fresh one could not be taken
+// (taskbar auto-hidden) and the taskbar has not been resized or moved sideways since.
+Span KeepShown(const Span& fresh, const Span& old) {
+    if (!fresh.measured && old.measured && old.bar == fresh.bar && old.barLeft == fresh.barLeft && old.barRight == fresh.barRight)
+        return old;
+    return fresh;
+}
+
+// The main taskbar's tray position from an earlier run, so a widget on an auto-hidden taskbar starts in the
+// right place before the taskbar is first shown. Stored as the distance from the taskbar's right edge to the
+// first tray button, valid only for the same taskbar width and DPI. Guarded by g_wbLock.
+struct SavedTray {
+    bool loaded = false, valid = false;
+    DWORD fromRight = 0, width = 0, dpi = 0;
+} g_savedTray;
+const wchar_t kSettingsKey[] = L"Software\\WirelessBattery";
+
+void LoadSavedTray() {  // call with g_wbLock held exclusively
+    if (g_savedTray.loaded) return;
+    g_savedTray.loaded = true;
+    DWORD v[3] = {}, sz = sizeof(DWORD);
+    const wchar_t* names[3] = { L"TrayFromRight", L"TrayBarWidth", L"TrayDpi" };
+    for (int i = 0; i < 3; i++, sz = sizeof(DWORD))
+        if (RegGetValueW(HKEY_CURRENT_USER, kSettingsKey, names[i], RRF_RT_REG_DWORD, nullptr, &v[i], &sz) != ERROR_SUCCESS) return;
+    g_savedTray = { true, true, v[0], v[1], v[2] };
+}
+
+void SaveTray(DWORD fromRight, DWORD width, DWORD dpi) {  // call with g_wbLock held exclusively
+    LoadSavedTray();
+    if (g_savedTray.valid && g_savedTray.fromRight == fromRight && g_savedTray.width == width && g_savedTray.dpi == dpi) return;
+    g_savedTray = { true, true, fromRight, width, dpi };
+    RegSetKeyValueW(HKEY_CURRENT_USER, kSettingsKey, L"TrayFromRight", REG_DWORD, &fromRight, sizeof(fromRight));
+    RegSetKeyValueW(HKEY_CURRENT_USER, kSettingsKey, L"TrayBarWidth", REG_DWORD, &width, sizeof(width));
+    RegSetKeyValueW(HKEY_CURRENT_USER, kSettingsKey, L"TrayDpi", REG_DWORD, &dpi, sizeof(dpi));
+}
+
+// True when the taskbar is not entirely on its monitor: an auto-hidden taskbar slid off the screen edge.
+bool OffScreen(HWND bar, const RECT& br) {
+    MONITORINFO mi{ sizeof(mi) };
+    HMONITOR mon = MonitorFromWindow(bar, MONITOR_DEFAULTTONEAREST);
+    if (!mon || !GetMonitorInfoW(mon, &mi)) return false;
+    const RECT& m = mi.rcMonitor;
+    return br.left < m.left || br.top < m.top || br.right > m.right || br.bottom > m.bottom;
+}
+
+// While an auto-hidden taskbar is hidden, only a strip of a few pixels stays on screen, and pointing at it
+// brings the taskbar up. A widget there would take the mouse instead, so it lets the mouse through
+// (WS_EX_TRANSPARENT on a layered window) until the taskbar is shown again.
+void SetClickThrough(HWND w, bool on) {
+    if (!w) return;
+    LONG ex = GetWindowLongW(w, GWL_EXSTYLE);
+    LONG want = on ? (ex | WS_EX_TRANSPARENT) : (ex & ~WS_EX_TRANSPARENT);
+    if (want != ex) SetWindowLongW(w, GWL_EXSTYLE, want);
+}
 std::vector<Span> g_spans;   // guarded by g_wbLock
 // The main taskbar measured the same way. On some Windows 11 builds the TrayNotifyWnd window starts
 // right of where the XAML tray (hidden-icons chevron, language, network, volume, clock) is drawn, so a
@@ -120,7 +182,10 @@ Span MeasureSpan(IUIAutomation* uia, HWND bar) {
     s.bar = bar;
     RECT br{};
     IUIAutomationElement* root = nullptr;
-    if (!GetWindowRect(bar, &br) || FAILED(uia->ElementFromHandle(bar, &root)) || !root) return s;
+    if (!GetWindowRect(bar, &br)) return s;
+    s.barLeft = br.left;
+    s.barRight = br.right;
+    if (OffScreen(bar, br) || FAILED(uia->ElementFromHandle(bar, &root)) || !root) return s;
     s.measured = true;
     auto inBar = [&](const RECT& r) { return r.right > r.left && r.left >= br.left && r.right <= br.right; };
     if (IUIAutomationCondition* clock = StringCondition(uia, UIA_AutomationIdPropertyId, L"SystemTrayIcon")) {
@@ -211,13 +276,30 @@ DWORD WINAPI WidgetsButtonThread(LPVOID) {
                 if (IsXamlTaskbar(t)) spans.push_back(MeasureSpan(uia, t));  // Windows 10 bars have real child windows
         Span primary = bar && uia && IsWindow(bar) ? MeasureSpan(uia, bar) : Span{};
         AcquireSRWLockExclusive(&g_wbLock);
+        bool moved = false;  // a tray position the widget should follow right away
+        for (Span& s : spans) {
+            bool known = false;
+            for (const Span& old : g_spans)
+                if (old.bar == s.bar) {
+                    known = true;
+                    s = KeepShown(s, old);
+                    moved |= s.measured != old.measured || s.hasClock != old.hasClock || s.clockLeft != old.clockLeft;
+                }
+            moved |= !known && s.measured;
+        }
         if (bar && g_wbTaskbar == bar) {  // drop a result for a taskbar we no longer sit on
             g_wbRect = r;
             g_wbRectBar = bar;
-            g_primarySpan = primary;
+            Span kept = KeepShown(primary, g_primarySpan);
+            moved |= kept.measured != g_primarySpan.measured || kept.hasClock != g_primarySpan.hasClock ||
+                     kept.clockLeft != g_primarySpan.clockLeft;
+            g_primarySpan = kept;
+            if (primary.measured && primary.hasClock && primary.barRight > primary.clockLeft)
+                SaveTray((DWORD)(primary.barRight - primary.clockLeft), (DWORD)(primary.barRight - primary.barLeft), GetDpiForWindow(bar));
         }
         g_spans = std::move(spans);
         ReleaseSRWLockExclusive(&g_wbLock);
+        if (moved && g_wnd) PostMessageW(g_wnd, kTrayMsg, 0, 0);
     }
 }
 
@@ -807,6 +889,11 @@ void HideMirror(Mirror& m) {
 void PositionMirror(Mirror& m) {
     RECT bar{};
     if (!GetWindowRect(m.bar, &bar) || (GetWindowLongW(m.bar, GWL_EXSTYLE) & WS_EX_LAYOUTRTL)) { HideMirror(m); return; }
+    if (!EqualRect(&bar, &m.lastBar)) {  // shown, hidden or resized: measure its clock again now
+        m.lastBar = bar;
+        if (g_wbWake) SetEvent(g_wbWake);
+    }
+    SetClickThrough(m.wnd, OffScreen(m.bar, bar));
     g_dpiBar = m.bar;
     if (Dpi() != m.dpi || m.size.cy != bar.bottom - bar.top) PaintMirror(m), g_dpiBar = m.bar;
     int right = 0, minLeft = bar.left;
@@ -1042,6 +1129,9 @@ LRESULT CALLBACK WidgetProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
         case kWheelMsg:  // posted by WheelProc
             CycleDevice((int)wp);
             return 0;
+        case kTrayMsg:  // the lookup thread found the tray somewhere else: move now, not on the next timer tick
+            widget::Reposition();
+            return 0;
         case WM_TIMER:
             if (wp == kAnimTimer) {
                 if (SlideProgress() >= 1.0) {
@@ -1226,6 +1316,13 @@ bool Reposition() {
     RECT tr, bar;
     GetWindowRect(tray, &tr);
     GetWindowRect(g_taskbar, &bar);
+    // An auto-hidden taskbar exposes its tray to UI Automation only while shown: measure again as soon as it moves.
+    static RECT seenBar{};
+    if (!EqualRect(&bar, &seenBar)) {
+        seenBar = bar;
+        if (g_wbWake) SetEvent(g_wbWake);
+    }
+    SetClickThrough(g_wnd, OffScreen(g_taskbar, bar));
     // The taskbar can be moved between a horizontal and a vertical edge while the app runs.
     bool vertical = bar.bottom - bar.top > bar.right - bar.left;
     if (vertical != g_vertical) {
@@ -1284,9 +1381,17 @@ bool Reposition() {
         }
     // Windows 11: when the XAML tray is drawn left of TrayNotifyWnd, sit left of the tray's first button.
     if (!rtl) {
-        AcquireSRWLockShared(&g_wbLock);
+        AcquireSRWLockExclusive(&g_wbLock);
         Span ps = g_primarySpan.bar == g_taskbar ? g_primarySpan : Span{};
-        ReleaseSRWLockShared(&g_wbLock);
+        if (!ps.measured) {  // auto-hidden and not shown yet since start: use the position from the last run
+            LoadSavedTray();
+            const SavedTray& st = g_savedTray;
+            if (st.valid && st.width == (DWORD)(bar.right - bar.left) && st.dpi == (DWORD)Dpi()) {
+                ps.measured = ps.hasClock = true;
+                ps.clockLeft = bar.right - (LONG)st.fromRight;
+            }
+        }
+        ReleaseSRWLockExclusive(&g_wbLock);
         if (ps.measured && ps.hasClock && ps.clockLeft < edge && ps.clockLeft > bar.left + g_size.cx &&
             (!ps.hasTasks || ps.clockLeft > ps.tasksRight))
             edge = ps.clockLeft;
