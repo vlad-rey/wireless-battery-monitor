@@ -8,7 +8,7 @@ Unicode true
 
 !define APP_NAME        "Wireless Battery Monitor"
 !define APP_ID          "WirelessBatteryMonitor"
-!define APP_VERSION     "1.0.1"
+!define APP_VERSION     "1.0.2"
 !define APP_EXE         "WirelessBattery.exe"
 !define APP_PUBLISHER   "Wireless Battery Monitor contributors"
 !define APP_URL         "https://github.com/vlad-rey/wireless-battery-monitor"
